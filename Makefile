@@ -1,6 +1,9 @@
 CC=gcc
 CCFLAGS=-Wall -Wextra -O2 -ggdb -g
 
+build: src/main.c builddir targetdir
+	cd build && $(CC) $(CCFLAGS) -o ../target/main ../src/main.c
+
 builddir:
 	mkdir -p build
 
@@ -9,11 +12,3 @@ targetdir:
 
 clean:
 	rm -rf build target
-
-
-program: src/main.c builddir targetdir
-	cd build && $(CC) $(CCFLAGS) -o ../target/main ../src/main.c
-
-run: program
-	target/main
-
