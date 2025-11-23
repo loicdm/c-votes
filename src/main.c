@@ -10,7 +10,8 @@
 struct SCandidate {
   const char *restrict name;
   size_t id;
-  int score;
+  int score_for;
+  int score_against;
 };
 typedef struct SCandidate Candidate;
 ;
@@ -25,9 +26,9 @@ struct SElection {
   const char *restrict name;
   CandidateDynArray candidates;
   int threshold_w;
-  int threshold_l;
+  int threshold_r;
   const Candidate *restrict winner;
-  CandidateDynArray loosers;
+  CandidateDynArray rejects;
 };
 typedef struct SElection Election;
 
@@ -62,15 +63,18 @@ Candidate *GetCandidateFromDynArray(CandidateDynArray *cda, size_t index) {
 void DumpCandidateDynArray(CandidateDynArray *cda, FILE *stream) {
   for (size_t i = 0; i < cda->count; i++) {
     Candidate *c = &(cda->array[i]);
-    fprintf(stream, "[%s][%zu] : %d\n", c->name, c->id, c->score);
+    fprintf(stream, "[%s][%zu] : %d/%d\n", c->name, c->id, c->score_for,
+            c->score_against);
   }
 }
-bool InitCandidate(Candidate *c, const char *restrict name, const size_t id) {
+bool InitCandidate(Candidate *c, const char *restrict name, const size_t id,
+                   int score_for, int score_against) {
   c->name = strdup(name);
   if (!c->name)
     return false;
   c->id = id;
-  c->score = 0;
+  c->score_for = score_for;
+  c->score_against = score_against;
   // printf("Candidat [%s] enregistré avec l'ID [%zu]\n", name, id);
   return true;
 }
@@ -84,26 +88,26 @@ void FreeCandidateDynArray(CandidateDynArray *cda) {
   free(cda->array);
 }
 bool InitElection(Election *e, const char *restrict name, int threshold_w,
-                  int threshold_l) {
+                  int threshold_r) {
   e->name = strdup(name);
   if (!InitCandidateDynArray(&(e->candidates))) {
     free(e);
     return false;
   }
-  if (!InitCandidateDynArray(&(e->loosers))) {
+  if (!InitCandidateDynArray(&(e->rejects))) {
     FreeCandidateDynArray(&(e->candidates));
     free(e);
     return false;
   }
   e->threshold_w = threshold_w;
-  e->threshold_l = threshold_l;
+  e->threshold_r = threshold_r;
   // printf("Election initialisée : [%s]\n", name);
   return true;
 }
 
 void FreeElectionContent(Election *e) {
   FreeCandidateDynArray(&(e->candidates));
-  FreeCandidateDynArray(&(e->loosers));
+  FreeCandidateDynArray(&(e->rejects));
   free((void *)e->name);
 }
 
@@ -115,7 +119,11 @@ bool AddCandidateToElection(Election *e, const Candidate c) {
 }
 
 void VoteForCandidate(Candidate *candidate, int count) {
-  candidate->score += count;
+  if (count >= 0) {
+    candidate->score_for += count;
+  } else {
+    candidate->score_against += -(count);
+  }
 }
 
 bool FindWinner(Election *e) {
@@ -126,11 +134,12 @@ bool FindWinner(Election *e) {
     winner = &(candidates->array[0]);
     for (size_t i = 0; i < candidates->count; i++) {
       Candidate *c = &(candidates->array[i]);
-      if (c->score > winner->score)
+      if (c->score_for > winner->score_for)
         winner = c;
     }
   }
-  if (winner->score >= e->threshold_w) {
+  if (winner->score_for > e->threshold_w &&
+      winner->score_against < e->threshold_r) {
     e->winner = winner;
     result = true;
   }
@@ -141,15 +150,15 @@ void DumpElection(Election *e, FILE *stream) {
   DumpCandidateDynArray(&(e->candidates), stream);
 }
 
-bool FindLoosers(Election *e) {
+bool FindReject(Election *e) {
   bool result = false;
   CandidateDynArray *candidates = &(e->candidates);
   for (size_t i = 0; i < candidates->count; i++) {
     Candidate *c = &(candidates->array[i]);
-    if (c->score < e->threshold_l) {
+    if (c->score_against >= e->threshold_r) {
       Candidate looser;
-      InitCandidate(&looser, c->name, c->id);
-      PushCandidateToDynArray(&(e->loosers), looser);
+      InitCandidate(&looser, c->name, c->id, c->score_for, c->score_against);
+      PushCandidateToDynArray(&(e->rejects), looser);
       result = true;
     }
   }
@@ -175,7 +184,7 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
     char *token = strtok(line, ",");
     while (token) {
       Candidate c;
-      if (!InitCandidate(&c, token, id)) {
+      if (!InitCandidate(&c, token, id, 0, 0)) {
         fclose(fp);
         free(line);
         return false;
@@ -206,7 +215,7 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
         VoteForCandidate(c, count);
         printf("%d vote(s) comptabilisé pour le candidat [%s] ID [%zu] score "
                "[%d]\n",
-               count, c->name, c->id, c->score);
+               count, c->name, c->id, count);
       }
       token = strtok(NULL, ",");
       id++;
@@ -224,7 +233,7 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
 void ShowHelp(FILE *s, char **argv) {
   fprintf(
       s,
-      "Usage : %s nom_election fichier_election seuil_victoire seuil_defaite\n",
+      "Usage : %s nom_election fichier_election seuil_victoire seuil_rejet\n",
       argv[0]);
 }
 
@@ -233,9 +242,14 @@ int main(int argc, char **argv) {
     ShowHelp(stderr, argv);
     return EXIT_FAILURE;
   }
-
+  int threshold_w = atoi(argv[3]);
+  int threshold_r = atoi(argv[4]);
+  if (threshold_r >= threshold_w) {
+    fprintf(stderr, "Le seuil de victoire doit être > au seil de rejet\n");
+    return EXIT_FAILURE;
+  }
   Election e;
-  if (!InitElection(&e, argv[1], atoi(argv[3]), atoi(argv[4]))) {
+  if (!InitElection(&e, argv[1], threshold_w, threshold_r)) {
     fprintf(stderr, "Impossible d'initialiser l'élection\n");
     return EXIT_FAILURE;
   }
@@ -255,11 +269,11 @@ int main(int argc, char **argv) {
     printf("Aucun Gagnant\n");
   } else {
     printf("Le gagnant est [%s] avec %d votes\n", e.winner->name,
-           e.winner->score);
+           e.winner->score_for);
   }
-  if (FindLoosers(&e)) {
-    printf("Les perdants sont : \n");
-    DumpCandidateDynArray(&(e.loosers), stdout);
+  if (FindReject(&e)) {
+    printf("Les candidats rejetés sont : \n");
+    DumpCandidateDynArray(&(e.rejects), stdout);
   }
 
   FreeElectionContent(&e);
