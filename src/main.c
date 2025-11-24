@@ -145,7 +145,7 @@ bool FindWinner(Election *e) {
     }
   }
   if ((100 * winner->score_for) >= e->vote_count * e->threshold_w &&
-      (100 * winner->score_against) < e->vote_count * e->threshold_r) {
+      (100 * winner->score_against) <= e->vote_count * e->threshold_r) {
     e->winner = winner;
     result = true;
   }
@@ -171,7 +171,7 @@ bool FindReject(Election *e) {
   CandidateDynArray *candidates = &(e->candidates);
   for (size_t i = 0; i < candidates->count; i++) {
     Candidate *c = &(candidates->array[i]);
-    if ((100 * c->score_against) >= e->vote_count * e->threshold_r) {
+    if ((100 * c->score_against) > e->vote_count * e->threshold_r) {
       Candidate looser;
       InitCandidate(&looser, c->name, c->id, c->score_for, c->score_against);
       PushCandidateToDynArray(&(e->rejects), looser);
