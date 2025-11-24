@@ -27,6 +27,9 @@ struct SElection {
   CandidateDynArray candidates;
   int threshold_w;
   int threshold_r;
+  int vote_count;
+  int blanks;
+  bool blank_win;
   const Candidate *restrict winner;
   CandidateDynArray rejects;
 };
@@ -87,8 +90,8 @@ void FreeCandidateDynArray(CandidateDynArray *cda) {
   }
   free(cda->array);
 }
-bool InitElection(Election *e, const char *restrict name, int threshold_w,
-                  int threshold_r) {
+bool InitElection(Election *e, const char *restrict name,
+                  unsigned int threshold_w, unsigned int threshold_r) {
   e->name = strdup(name);
   if (!InitCandidateDynArray(&(e->candidates))) {
     free(e);
@@ -101,6 +104,9 @@ bool InitElection(Election *e, const char *restrict name, int threshold_w,
   }
   e->threshold_w = threshold_w;
   e->threshold_r = threshold_r;
+  e->blanks = 0;
+  e->blank_win = false;
+  e->vote_count = 0;
   // printf("Election initialisée : [%s]\n", name);
   return true;
 }
@@ -138,16 +144,26 @@ bool FindWinner(Election *e) {
         winner = c;
     }
   }
-  if (winner->score_for > e->threshold_w &&
-      winner->score_against < e->threshold_r) {
+  if ((100 * winner->score_for) >= e->vote_count * e->threshold_w &&
+      (100 * winner->score_against) < e->vote_count * e->threshold_r) {
     e->winner = winner;
     result = true;
+  }
+
+  if (e->blanks && (100 * e->blanks) >= e->vote_count * e->threshold_w) {
+    if (winner && winner->score_for < e->blanks) {
+      winner = NULL;
+      result = false;
+      e->blank_win = true;
+    }
   }
   return result;
 }
 
 void DumpElection(Election *e, FILE *stream) {
   DumpCandidateDynArray(&(e->candidates), stream);
+  fprintf(stream, "Nombre de votes blancs : %d\n", e->blanks);
+  fprintf(stream, "Total des votes : %d\n", e->vote_count);
 }
 
 bool FindReject(Election *e) {
@@ -155,7 +171,7 @@ bool FindReject(Election *e) {
   CandidateDynArray *candidates = &(e->candidates);
   for (size_t i = 0; i < candidates->count; i++) {
     Candidate *c = &(candidates->array[i]);
-    if (c->score_against >= e->threshold_r) {
+    if ((100 * c->score_against) >= e->vote_count * e->threshold_r) {
       Candidate looser;
       InitCandidate(&looser, c->name, c->id, c->score_for, c->score_against);
       PushCandidateToDynArray(&(e->rejects), looser);
@@ -176,6 +192,7 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
+  size_t line_count = 0;
   // Process des candidats
   if ((read = getline(&line, &len, fp)) != -1) {
     size_t id = 0;
@@ -200,6 +217,7 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
       printf("[%s][%zu] ajouté à l'élection [%s]\n", c.name, c.id, e->name);
       id++;
       token = strtok(NULL, ",");
+      line_count++;
     }
   }
   // process des votes
@@ -208,7 +226,14 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
     if (line[read - 1] == '\n')
       line[read - 1] = '\0';
     char *token = strtok(line, ",");
+    bool all_zeros = true;
+    bool well_formed = true;
     while (token) {
+      if (id >= e->candidates.count) {
+        fprintf(stderr, "Ligne %zu mal formée\n", line_count);
+        well_formed = false;
+        break;
+      }
       int count = atoi(token);
       if (count != 0) {
         Candidate *c = GetCandidateFromDynArray(&(e->candidates), id);
@@ -216,10 +241,19 @@ bool FileElectionFromFile(Election *e, const char *restrict path) {
         printf("%d vote(s) comptabilisé pour le candidat [%s] ID [%zu] score "
                "[%d]\n",
                count, c->name, c->id, count);
+        all_zeros = false;
       }
       token = strtok(NULL, ",");
       id++;
     }
+    if (well_formed) {
+      if (all_zeros) {
+        printf("Vote blanc comptabilisé\n");
+        e->blanks++;
+      }
+      e->vote_count++;
+    }
+    line_count++;
   }
   // Free the memory allocated by getline and close the file
   free(line);
@@ -244,10 +278,13 @@ int main(int argc, char **argv) {
   }
   int threshold_w = atoi(argv[3]);
   int threshold_r = atoi(argv[4]);
-  if (threshold_r >= threshold_w) {
-    fprintf(stderr, "Le seuil de victoire doit être > au seil de rejet\n");
+
+  if (threshold_r > 100 || threshold_r < 0 || threshold_w > 100 ||
+      threshold_w < 0) {
+    fprintf(stderr, "Les seuils doivent être entre 0 et 100\n");
     return EXIT_FAILURE;
   }
+
   Election e;
   if (!InitElection(&e, argv[1], threshold_w, threshold_r)) {
     fprintf(stderr, "Impossible d'initialiser l'élection\n");
@@ -267,6 +304,9 @@ int main(int argc, char **argv) {
 
   if (!FindWinner(&e)) {
     printf("Aucun Gagnant\n");
+    if (e.blank_win) {
+      printf("Le vote blanc l'emporte avec %d vote(s)\n", e.blanks);
+    }
   } else {
     printf("Le gagnant est [%s] avec %d votes\n", e.winner->name,
            e.winner->score_for);
