@@ -12,7 +12,7 @@ struct SCandidate {
   int scoreAgainst;
 };
 typedef struct SCandidate Candidate;
-;
+
 struct SCandidateDynArray {
   Candidate *array;
   size_t count;
@@ -180,7 +180,7 @@ bool FindReject(Election *e) {
   return result;
 }
 
-bool FileElectionFromFile(Election *e, const char *restrict path) {
+bool GetElectionDataFromFile(Election *e, const char *restrict path) {
   FILE *fp = fopen(path, "r");
   if (fp == NULL) {
     perror("Erreur lors de l'ouverture du fichier");
@@ -288,7 +288,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Impossible d'initialiser l'élection\n");
     return EXIT_FAILURE;
   }
-  if (!FileElectionFromFile(&e, argv[2])) {
+  if (!GetElectionDataFromFile(&e, argv[2])) {
     fprintf(stderr, "Impossible de remplir l'élection avec le fichier : %s\n",
             argv[2]);
     return EXIT_FAILURE;
