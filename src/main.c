@@ -92,12 +92,10 @@ bool InitElection(Election *e, const char *restrict name,
                   unsigned int thresholdW, unsigned int thresholdR) {
   e->name = strdup(name);
   if (!InitCandidateDynArray(&(e->candidates))) {
-    free(e);
     return false;
   }
   if (!InitCandidateDynArray(&(e->rejects))) {
     FreeCandidateDynArray(&(e->candidates));
-    free(e);
     return false;
   }
   e->thresholdW = thresholdW;
@@ -133,6 +131,8 @@ void VoteForCandidate(Candidate *candidate, int count) {
 bool FindWinner(Election *e) {
   Candidate *winner = NULL;
   bool result = false;
+  if (e->voteCount == 0)
+    return result;
   CandidateDynArray *candidates = &(e->candidates);
   if (candidates->count > 0) {
     winner = &(candidates->array[0]);
